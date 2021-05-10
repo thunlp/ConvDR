@@ -7,6 +7,7 @@ from transformers import (
     RobertaModel,
     RobertaForSequenceClassification,
     RobertaTokenizer,
+    BertModel,
     BertTokenizer,
     BertConfig
 )
@@ -241,6 +242,36 @@ class RobertaDot_CLF_ANN_NLL_MultiChunk(NLL_MultiChunk, RobertaDot_NLL_LN):
             batchS, chunk_factor, embeddingS)
 
         return complex_emb_k  # size [batchS, chunk_factor, embeddingS]
+
+
+class HFBertEncoder(BertModel):
+    def __init__(self, config):
+        BertModel.__init__(self, config)
+        assert config.hidden_size > 0, 'Encoder hidden_size can\'t be zero'
+        self.init_weights()
+    @classmethod
+    def init_encoder(cls, args, dropout: float = 0.1):
+        cfg = BertConfig.from_pretrained("bert-base-uncased")
+        if dropout != 0:
+            cfg.attention_probs_dropout_prob = dropout
+            cfg.hidden_dropout_prob = dropout
+        return cls.from_pretrained("bert-base-uncased")
+
+
+    def forward(self, input_ids, attention_mask):
+        hidden_states = None
+
+
+
+        sequence_output, pooled_output = super().forward(input_ids=input_ids,
+                                                         attention_mask=attention_mask)
+        pooled_output = sequence_output[:, 0, :]
+        return sequence_output, pooled_output, hidden_states
+    def get_out_size(self):
+        if self.encode_proj:
+            return self.encode_proj.out_features
+        return self.config.hidden_size
+
         
 
 class BiEncoder(nn.Module):

@@ -402,20 +402,24 @@ class ConvSearchDataset(Dataset):
                         doc_negs = record["doc_negs"]
 
                     if mode == "train" or args.query in ["concat", "mc", "ac"]: 
-
+                        if args.model_type == "dpr":
+                            concat_ids.append(tokenizer.cls_token_id)  # dpr uses BERT, so use BERT-style sequence
                         for sent in input_sents[:-1]:  # exlude last one
-                            concat_ids.append(tokenizer.cls_token_id)
+                            if args.model_type != "dpr":
+                                concat_ids.append(tokenizer.cls_token_id)  # otherwise use RoBERTa-style sequece
                             concat_ids.extend(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(sent)))
                             concat_ids.append(tokenizer.sep_token_id)
 
                         if args.y2 and len(responses) >= 2:  # add last response
-                            concat_ids.append(tokenizer.cls_token_id)
+                            if args.model_type != "dpr":
+                                concat_ids.append(tokenizer.cls_token_id)
                             concat_ids.extend(tokenizer.convert_tokens_to_ids(["<response>"]))
                             concat_ids.extend(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(responses[-2])))
                             concat_ids.append(tokenizer.sep_token_id)
                             sequences.insert(-1, responses[-2])
 
-                        concat_ids.append(tokenizer.cls_token_id)
+                        if args.model_type != "dpr":
+                            concat_ids.append(tokenizer.cls_token_id)
                         concat_ids.extend(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(input_sents[-1])))
                         concat_ids.append(tokenizer.sep_token_id)
                             

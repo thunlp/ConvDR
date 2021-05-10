@@ -9,7 +9,7 @@ import time
 
 import copy
 from utils.dpr_utils import get_model_obj, load_states_from_checkpoint
-from utils.msmarco_eval import compute_metrics
+# from utils.msmarco_eval import compute_metrics
 import faiss
 import pytrec_eval
 import torch
@@ -64,7 +64,7 @@ def set_seed(args):
 def EvalDevQuery(query_embedding2id, merged_D, 
                  dev_query_positive_id, I_nearest_neighbor, 
                  topN, output_file, output_trec_file,
-                 offset2pid, msmarco_data_dir, dev_query_name,
+                 offset2pid, raw_data_dir, dev_query_name,
                  raw_sequences=None):
     prediction = {} #[qid][docid] = docscore, here we use -rank as score, so the higher the rank (1 > 2), the higher the score (-1 > -2)
 
@@ -118,12 +118,12 @@ def EvalDevQuery(query_embedding2id, merged_D,
 
     logger.info("Reading queries and passages...")
     queries = ["xxx"] * 200_0000
-    with open(os.path.join(msmarco_data_dir, "queries." + dev_query_name + ".tsv"), "r") as f:
+    with open(os.path.join(raw_data_dir, "queries." + dev_query_name + ".tsv"), "r") as f:
         for line in f:
             qid, query = line.strip().split("\t")
             qid = int(qid)
             queries[qid] = query
-    collection = os.path.join(msmarco_data_dir, "collection.jsonl")
+    collection = os.path.join(raw_data_dir, "collection.jsonl")
     all_passages = ["xx"] * 4000_0000
     with open(collection, "r") as f:
         for line in f:
@@ -156,40 +156,40 @@ def EvalDevQuery(query_embedding2id, merged_D,
                                     "input": sequences}) + "\n")
                 g.write(str(ori_qid) + " Q0 " + str(ori_pid) + " " + str(i+1) + " " + str(-i-1+200) + " ance\n")
     
-    qids_to_relevant_passageids = {}
-    for qid in dev_query_positive_id:
-        qid = int(qid)
-        if qid in qids_to_relevant_passageids:
-            pass
-        else:
-            qids_to_relevant_passageids[qid] = []
-            for pid in dev_query_positive_id[qid]:
-                if dev_query_positive_id[qid][pid]>0:
-                    qids_to_relevant_passageids[qid].append(pid)
+    # qids_to_relevant_passageids = {}
+    # for qid in dev_query_positive_id:
+    #     qid = int(qid)
+    #     if qid in qids_to_relevant_passageids:
+    #         pass
+    #     else:
+    #         qids_to_relevant_passageids[qid] = []
+    #         for pid in dev_query_positive_id[qid]:
+    #             if dev_query_positive_id[qid][pid]>0:
+    #                 qids_to_relevant_passageids[qid].append(pid)
     
-    ms_mrr = compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passages_ori)
+    # ms_mrr = compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passages_ori)
 
-    ndcg = 0
-    Map = 0
-    mrr = 0
-    recall = 0
-    recall_1000 = 0
+    # ndcg = 0
+    # Map = 0
+    # mrr = 0
+    # recall = 0
+    # recall_1000 = 0
 
-    for k in result.keys():
-        eval_query_cnt += 1
-        ndcg += result[k]["ndcg_cut_3"]
-        Map += result[k]["map_cut_10"]
-        mrr += result[k]["recip_rank"]
-        recall += result[k]["recall_"+str(topN)]
+    # for k in result.keys():
+    #     eval_query_cnt += 1
+    #     ndcg += result[k]["ndcg_cut_3"]
+    #     Map += result[k]["map_cut_10"]
+    #     mrr += result[k]["recip_rank"]
+    #     recall += result[k]["recall_"+str(topN)]
 
-    final_ndcg = ndcg / eval_query_cnt
-    final_Map = Map / eval_query_cnt
-    final_mrr = mrr / eval_query_cnt
-    final_recall = recall / eval_query_cnt
+    # final_ndcg = ndcg / eval_query_cnt
+    # final_Map = Map / eval_query_cnt
+    # final_mrr = mrr / eval_query_cnt
+    # final_recall = recall / eval_query_cnt
     # hole_rate = labeled/total
     # Ahole_rate = Alabeled/Atotal
 
-    return final_ndcg, eval_query_cnt, final_Map, final_mrr, final_recall, 0, ms_mrr, 0, result, prediction
+    # return final_ndcg, eval_query_cnt, final_Map, final_mrr, final_recall, 0, ms_mrr, 0, result, prediction
 
 
 def evaluate(args, eval_dataset, model, logger):
@@ -200,7 +200,7 @@ def evaluate(args, eval_dataset, model, logger):
     logger.info("***** Running evaluation *****")
     logger.info("  Num examples = %d", len(eval_dataset))
     logger.info("  Instantaneous batch size per GPU = %d", args.per_gpu_eval_batch_size)
-    collection = os.path.join(args.msmarco_data_dir, "collection.tsv")
+    collection = os.path.join(args.raw_data_dir, "collection.tsv")
 
     model.zero_grad()
     set_seed(args)  # Added here for reproducibility (even between python 2 and 3)
@@ -211,7 +211,7 @@ def evaluate(args, eval_dataset, model, logger):
     epoch_iterator = eval_dataloader
     for step, batch in enumerate(epoch_iterator):
         # topic_number, query_number = batch[:2]
-        qids = batch[0]
+        qids = batch["qid"]
         ids, id_mask = (ele.to(args.device) for ele in [batch["concat_ids"], batch["concat_id_mask"]]) 
         model.eval()
         with torch.no_grad():
@@ -233,24 +233,24 @@ def load_model(args, checkpoint_path):
     num_labels = len(label_list)
     args.model_type = args.model_type.lower()
     configObj = MSMarcoConfigDict[args.model_type]
-    args.model_name_or_path = checkpoint_path
+    args.model_path = checkpoint_path
 
     config, tokenizer, model = None, None, None
     if args.model_type != "dpr":
         config = configObj.config_class.from_pretrained(
-            args.model_name_or_path,
+            args.model_path,
             num_labels=num_labels,
             finetuning_task="MSMarco",
             cache_dir=args.cache_dir if args.cache_dir else None,
         )
         tokenizer = configObj.tokenizer_class.from_pretrained(
-            args.model_name_or_path,
+            args.model_path,
             do_lower_case=True,
             cache_dir=args.cache_dir if args.cache_dir else None,
         )
         model = configObj.model_class.from_pretrained(
-            args.model_name_or_path,
-            from_tf=bool(".ckpt" in args.model_name_or_path),
+            args.model_path,
+            from_tf=bool(".ckpt" in args.model_path),
             config=config,
             cache_dir=args.cache_dir if args.cache_dir else None,
         )
@@ -273,16 +273,16 @@ def load_model(args, checkpoint_path):
     return config, tokenizer, model
 
 
-def search_one_by_one(ann_data_dir, gpu_index, query_embedding, step):
+def search_one_by_one(ann_data_dir, gpu_index, query_embedding):
     merged_candidate_matrix = None
     for block_id in range(8):
         logger.info("Loading passage reps " + str(block_id))
         passage_embedding = None
         passage_embedding2id = None
         try:
-            with open(os.path.join(ann_data_dir, "passage_"+ str(step) + "__emb_p__data_obj_"+str(block_id)+".pb"), 'rb') as handle:
+            with open(os.path.join(ann_data_dir, "passage__emb_p__data_obj_"+str(block_id)+".pb"), 'rb') as handle:
                 passage_embedding = pickle.load(handle)
-            with open(os.path.join(ann_data_dir, "passage_"+ str(step) + "__embid_p__data_obj_"+str(block_id)+".pb"), 'rb') as handle:
+            with open(os.path.join(ann_data_dir, "passage__embid_p__data_obj_"+str(block_id)+".pb"), 'rb') as handle:
                 passage_embedding2id = pickle.load(handle)
         except:
             break
@@ -348,7 +348,7 @@ def search_one_by_one(ann_data_dir, gpu_index, query_embedding, step):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", type=str,
+    parser.add_argument("--model_path", type=str,
                         help="The model checkpoint for weights initialization.")
     parser.add_argument("--eval_file", type=str)
     parser.add_argument("--block_size", default=256, type=int,
@@ -369,7 +369,7 @@ def main():
     parser.add_argument("--use_gpu", action='store_true')
     parser.add_argument("--qrels", type=str)
     parser.add_argument("--processed_data_dir", type=str)
-    parser.add_argument("--msmarco_data_dir", type=str)
+    parser.add_argument("--raw_data_dir", type=str)
     parser.add_argument("--output_file", type=str)
     parser.add_argument("--output_trec_file", type=str)
     parser.add_argument("--query", type=str, default="concat")
@@ -379,7 +379,7 @@ def main():
     parser.add_argument("--log_dir", type=str)
     parser.add_argument("--eval_on_train", action='store_true')
     parser.add_argument("--fold", type=int, default=-1)
-    parser.add_argument("--step", type=int)
+    # parser.add_argument("--step", type=int)
     parser.add_argument(
         "--model_type",
         default=None,
@@ -442,7 +442,7 @@ def main():
 
     if not args.cross_validate:
 
-        config, tokenizer, model = load_model(args, args.model_name_or_path)
+        config, tokenizer, model = load_model(args, args.model_path)
 	
         if args.block_size <= 0:
             args.block_size = tokenizer.max_len_single_sentence
@@ -451,7 +451,7 @@ def main():
         # eval
         logger.info("Training/evaluation parameters %s", args)
         eval_dataset = ConvSearchDataset([args.eval_file], tokenizer, args, mode="inference")
-        total_embedding, total_embedding2id, raw_sequences = evaluate(args, eval_dataset, model, logger, tb_writer, 0)
+        total_embedding, total_embedding2id, raw_sequences = evaluate(args, eval_dataset, model, logger)
         # logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
         total_raw_sequences.extend(raw_sequences)
         del model
@@ -466,7 +466,7 @@ def main():
             
             logger.info("Testing Fold #{}".format(i))
             suffix = ('-' + str(i))
-            config, tokenizer, model = load_model(args, args.model_name_or_path + suffix)
+            config, tokenizer, model = load_model(args, args.model_path + suffix)
 
             if args.block_size <= 0:
                 args.block_size = tokenizer.max_len_single_sentence
@@ -477,7 +477,7 @@ def main():
             logger.info("eval_file: {}".format(eval_file))
             train_files = ["%s.%d" % (args.eval_file, j) for j in range(NUM_FOLD) if j != i]
             eval_dataset = ConvSearchDataset([eval_file], tokenizer, args, mode="inference") if not args.eval_on_train else ConvSearchDataset(train_files, tokenizer, args, mode="inference")
-            embedding, embedding2id, raw_sequences = evaluate(args, eval_dataset, model, logger, tb_writer, i)
+            embedding, embedding2id, raw_sequences = evaluate(args, eval_dataset, model, logger)
             total_embedding.append(embedding)
             total_embedding2id.extend(embedding2id)
             total_raw_sequences.extend(raw_sequences)
@@ -487,25 +487,16 @@ def main():
             
         total_embedding = np.concatenate(total_embedding, axis=0)
 
-    merged_D, merged_I = search_one_by_one(args.ann_data_dir, index, total_embedding, args.step)
+    merged_D, merged_I = search_one_by_one(args.ann_data_dir, index, total_embedding)
     logger.info("start EvalDevQuery...")
-    result = EvalDevQuery(total_embedding2id, merged_D,
+    EvalDevQuery(total_embedding2id, merged_D,
                     dev_query_positive_id=dev_query_positive_id,
                     I_nearest_neighbor=merged_I, topN=100,
                     output_file=args.output_file, output_trec_file=args.output_trec_file,
-                    offset2pid=offset2pid, msmarco_data_dir=args.msmarco_data_dir,
+                    offset2pid=offset2pid, raw_data_dir=args.raw_data_dir,
                     dev_query_name=args.dev_query_name,
                     raw_sequences=total_raw_sequences)
 
-    final_ndcg, eval_query_cnt, final_Map, final_mrr, final_recall, hole_rate, ms_mrr, Ahole_rate, metrics, prediction = result
-    print("Results for checkpoint xxx")
-    print("NDCG@10:" + str(final_ndcg))
-    print("map@10:" + str(final_Map))
-    print("pytrec_mrr:" + str(final_mrr))
-    print("recall@"+str(100)+":" + str(final_recall))
-    print("hole rate@10:" + str(hole_rate))
-    print("hole rate:" + str(Ahole_rate))
-    print("ms_mrr:" + str(ms_mrr))
     if args.log_dir:
         tb_writer.close()
 
