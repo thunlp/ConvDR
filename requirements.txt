@@ -4,3 +4,4 @@ faiss-gpu
 torch==1.6.0
 sklearn
 tensorboardX
+trec-car-tools

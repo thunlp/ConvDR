@@ -6,31 +6,19 @@ from model.models import MSMarcoConfigDict
 import os
 import pickle
 import time
-
 import copy
-from utils.dpr_utils import get_model_obj, load_states_from_checkpoint
-# from utils.msmarco_eval import compute_metrics
 import faiss
-import pytrec_eval
 import torch
-import random
 import numpy as np
-from tensorboardX import SummaryWriter
 from torch.utils.data.sampler import SequentialSampler
-import torch.nn.functional as F
-
-from utils.util import convert_to_string_id, pad_input_ids, pad_input_ids_with_mask
-
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from utils.util import ConvSearchDataset
+from utils.util import ConvSearchDataset, NUM_FOLD, set_seed, load_model
 
-
-global_responses = {}
+logger = logging.getLogger(__name__)
 
 ngpu = faiss.get_num_gpus()
-
 gpu_resources = []
 tempmem = -1
 
@@ -39,6 +27,7 @@ for i in range(ngpu):
     if tempmem >= 0:
         res.setTempMemory(tempmem)
     gpu_resources.append(res)
+
 
 def make_vres_vdev(i0=0, i1=-1):
     " return vectors of device ids and resources useful for gpu_multiple"
@@ -51,34 +40,21 @@ def make_vres_vdev(i0=0, i1=-1):
         vres.push_back(gpu_resources[i])
     return vres, vdev
 
-logger = logging.getLogger(__name__)
-NUM_FOLD = 5
-
-def set_seed(args):
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if args.n_gpu > 0:
-        torch.cuda.manual_seed_all(args.seed)
 
 def EvalDevQuery(query_embedding2id, merged_D, 
                  dev_query_positive_id, I_nearest_neighbor, 
                  topN, output_file, output_trec_file,
-                 offset2pid, raw_data_dir, dev_query_name,
+                 offset2pid, raw_data_dir, output_query_type,
                  raw_sequences=None):
-    prediction = {} #[qid][docid] = docscore, here we use -rank as score, so the higher the rank (1 > 2), the higher the score (-1 > -2)
+    prediction = {}
 
-    total = 0
-    labeled = 0
-    Atotal = 0
-    Alabeled = 0
     qids_to_ranked_candidate_passages = {} 
     qids_to_ranked_candidate_passages_ori = {}
     qids_to_raw_sequences = {}
     for query_idx in range(len(I_nearest_neighbor)): 
         seen_pid = set()
         inputs = raw_sequences[query_idx]
-        query_id = int(query_embedding2id[query_idx])
+        query_id = query_embedding2id[query_idx]
         prediction[query_id] = {}
 
         top_ann_pid = I_nearest_neighbor[query_idx].copy()
@@ -90,7 +66,6 @@ def EvalDevQuery(query_embedding2id, merged_D,
         if query_id in qids_to_ranked_candidate_passages:
             pass    
         else:
-            # By default, all PIDs in the list of 1000 are 0. Only override those that are given
             tmp = [(0, 0)] * 100
             tmp_ori = [0] * 100
             qids_to_ranked_candidate_passages[query_id] = tmp
@@ -101,7 +76,6 @@ def EvalDevQuery(query_embedding2id, merged_D,
             pred_pid = offset2pid[idx]
             
             if not pred_pid in seen_pid:
-                # this check handles multiple vector per document
                 qids_to_ranked_candidate_passages[query_id][rank]=(pred_pid, score)
                 qids_to_ranked_candidate_passages_ori[query_id][rank] = pred_pid
 
@@ -109,19 +83,11 @@ def EvalDevQuery(query_embedding2id, merged_D,
                 prediction[query_id][pred_pid] = -rank
                 seen_pid.add(pred_pid)
 
-    # use out of the box evaluation script
-    evaluator = pytrec_eval.RelevanceEvaluator(
-        convert_to_string_id(dev_query_positive_id), {'map_cut', 'ndcg_cut.3', 'recip_rank','recall'})
-
-    eval_query_cnt = 0
-    result = evaluator.evaluate(convert_to_string_id(prediction))
-
     logger.info("Reading queries and passages...")
-    queries = ["xxx"] * 200_0000
-    with open(os.path.join(raw_data_dir, "queries." + dev_query_name + ".tsv"), "r") as f:
+    queries = {}
+    with open(os.path.join(raw_data_dir, "queries." + output_query_type + ".tsv"), "r") as f:
         for line in f:
             qid, query = line.strip().split("\t")
-            qid = int(qid)
             queries[qid] = query
     collection = os.path.join(raw_data_dir, "collection.jsonl")
     all_passages = ["xx"] * 4000_0000
@@ -136,7 +102,7 @@ def EvalDevQuery(query_embedding2id, merged_D,
             except IndexError:
                 print(line)
 
-    # write to file! qid \t pid \t q \t d \t
+    # Write to file
     with open(output_file, "w") as f, open(output_trec_file, "w") as g:
         for qid, passages in qids_to_ranked_candidate_passages.items():
             ori_qid = qid
@@ -155,62 +121,24 @@ def EvalDevQuery(query_embedding2id, merged_D,
                                     "retrieval_score": score,
                                     "input": sequences}) + "\n")
                 g.write(str(ori_qid) + " Q0 " + str(ori_pid) + " " + str(i+1) + " " + str(-i-1+200) + " ance\n")
-    
-    # qids_to_relevant_passageids = {}
-    # for qid in dev_query_positive_id:
-    #     qid = int(qid)
-    #     if qid in qids_to_relevant_passageids:
-    #         pass
-    #     else:
-    #         qids_to_relevant_passageids[qid] = []
-    #         for pid in dev_query_positive_id[qid]:
-    #             if dev_query_positive_id[qid][pid]>0:
-    #                 qids_to_relevant_passageids[qid].append(pid)
-    
-    # ms_mrr = compute_metrics(qids_to_relevant_passageids, qids_to_ranked_candidate_passages_ori)
-
-    # ndcg = 0
-    # Map = 0
-    # mrr = 0
-    # recall = 0
-    # recall_1000 = 0
-
-    # for k in result.keys():
-    #     eval_query_cnt += 1
-    #     ndcg += result[k]["ndcg_cut_3"]
-    #     Map += result[k]["map_cut_10"]
-    #     mrr += result[k]["recip_rank"]
-    #     recall += result[k]["recall_"+str(topN)]
-
-    # final_ndcg = ndcg / eval_query_cnt
-    # final_Map = Map / eval_query_cnt
-    # final_mrr = mrr / eval_query_cnt
-    # final_recall = recall / eval_query_cnt
-    # hole_rate = labeled/total
-    # Ahole_rate = Alabeled/Atotal
-
-    # return final_ndcg, eval_query_cnt, final_Map, final_mrr, final_recall, 0, ms_mrr, 0, result, prediction
 
 
 def evaluate(args, eval_dataset, model, logger):
-    args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu) if not args.y2 else 1
+    args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size, collate_fn=eval_dataset.get_collate_fn(args, "inference"))
 
     logger.info("***** Running evaluation *****")
     logger.info("  Num examples = %d", len(eval_dataset))
     logger.info("  Instantaneous batch size per GPU = %d", args.per_gpu_eval_batch_size)
-    collection = os.path.join(args.raw_data_dir, "collection.tsv")
 
     model.zero_grad()
     set_seed(args)  # Added here for reproducibility (even between python 2 and 3)
     embedding = []
     embedding2id = []
     raw_sequences = []
-    # epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
     epoch_iterator = eval_dataloader
-    for step, batch in enumerate(epoch_iterator):
-        # topic_number, query_number = batch[:2]
+    for batch in epoch_iterator:
         qids = batch["qid"]
         ids, id_mask = (ele.to(args.device) for ele in [batch["concat_ids"], batch["concat_id_mask"]]) 
         model.eval()
@@ -226,51 +154,6 @@ def evaluate(args, eval_dataset, model, logger):
 
     embedding = np.concatenate(embedding, axis=0)
     return embedding, embedding2id, raw_sequences
-
-
-def load_model(args, checkpoint_path):
-    label_list = ["0", "1"]
-    num_labels = len(label_list)
-    args.model_type = args.model_type.lower()
-    configObj = MSMarcoConfigDict[args.model_type]
-    args.model_path = checkpoint_path
-
-    config, tokenizer, model = None, None, None
-    if args.model_type != "dpr":
-        config = configObj.config_class.from_pretrained(
-            args.model_path,
-            num_labels=num_labels,
-            finetuning_task="MSMarco",
-            cache_dir=args.cache_dir if args.cache_dir else None,
-        )
-        tokenizer = configObj.tokenizer_class.from_pretrained(
-            args.model_path,
-            do_lower_case=True,
-            cache_dir=args.cache_dir if args.cache_dir else None,
-        )
-        model = configObj.model_class.from_pretrained(
-            args.model_path,
-            from_tf=bool(".ckpt" in args.model_path),
-            config=config,
-            cache_dir=args.cache_dir if args.cache_dir else None,
-        )
-    else:  # dpr
-        model = configObj.model_class(args)
-        saved_state = load_states_from_checkpoint(checkpoint_path)
-        model_to_load = get_model_obj(model)
-        logger.info('Loading saved model state ...')
-        model_to_load.load_state_dict(saved_state.model_dict)
-        tokenizer = configObj.tokenizer_class.from_pretrained(
-            "bert-base-uncased",
-            do_lower_case=True,
-            cache_dir=None,
-        )
-
-    model.to(args.device)
-    logger.info("Inference parameters %s", args)
-    if args.n_gpu > 1:
-        model = torch.nn.DataParallel(model)
-    return config, tokenizer, model
 
 
 def search_one_by_one(ann_data_dir, gpu_index, query_embedding):
@@ -348,38 +231,108 @@ def search_one_by_one(ann_data_dir, gpu_index, query_embedding):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", type=str,
-                        help="The model checkpoint for weights initialization.")
-    parser.add_argument("--eval_file", type=str)
-    parser.add_argument("--block_size", default=256, type=int,
-                        help="Optional input sequence length after tokenization."
-                             "The training dataset will be truncated in block of this size for training."
-                             "Default to the model max input length for single sentence inputs (take into account special tokens).")
-    parser.add_argument("--max_query_length", default=64, type=int)
-    parser.add_argument("--cross_validate", action='store_true',
-                        help="Set when doing cross validation")
-    parser.add_argument("--per_gpu_eval_batch_size", default=4, type=int,
-                        help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--no_cuda", action='store_true',
-                        help="Avoid using CUDA when available")
-    parser.add_argument('--seed', type=int, default=42,
-                        help="random seed for initialization")
-    parser.add_argument("--cache_dir", type=str)
-    parser.add_argument("--ann_data_dir", type=str)
-    parser.add_argument("--use_gpu", action='store_true')
-    parser.add_argument("--qrels", type=str)
-    parser.add_argument("--processed_data_dir", type=str)
-    parser.add_argument("--raw_data_dir", type=str)
-    parser.add_argument("--output_file", type=str)
-    parser.add_argument("--output_trec_file", type=str)
-    parser.add_argument("--query", type=str, default="concat")
-    parser.add_argument("--y2", action="store_true")
-    parser.add_argument("--dev_query_name", type=str)
-    parser.add_argument("--mse", action='store_true', help="Whether to measure mse loss")
-    parser.add_argument("--log_dir", type=str)
-    parser.add_argument("--eval_on_train", action='store_true')
-    parser.add_argument("--fold", type=int, default=-1)
-    # parser.add_argument("--step", type=int)
+    parser.add_argument(
+        "--model_path", 
+        type=str,
+        help="The model checkpoint."
+    )
+    parser.add_argument(
+        "--eval_file", 
+        type=str,
+        help="The evaluation dataset."
+    )
+    parser.add_argument(
+        "--max_concat_length", 
+        default=256, 
+        type=int,
+        help="Max input concatenated query length after tokenization."
+    )
+    parser.add_argument(
+        "--max_query_length", 
+        default=64, 
+        type=int,
+        help="Max input query length after tokenization."
+             "This option is for single query input."
+    )
+    parser.add_argument(
+        "--cross_validate", 
+        action='store_true',
+        help="Set when doing cross validation."
+    )
+    parser.add_argument(
+        "--per_gpu_eval_batch_size", 
+        default=4, 
+        type=int,
+        help="Batch size per GPU/CPU."
+    )
+    parser.add_argument(
+        "--no_cuda", 
+        action='store_true',
+        help="Avoid using CUDA when available (for pytorch)."
+    )
+    parser.add_argument(
+        '--seed', 
+        type=int, 
+        default=42,
+        help="Random seed for initialization."
+    )
+    parser.add_argument(
+        "--cache_dir", 
+        type=str
+    )
+    parser.add_argument(
+        "--ann_data_dir", 
+        type=str,
+        help="Path to ANCE embeddings."
+    )
+    parser.add_argument(
+        "--use_gpu",
+        action='store_true',
+        help="Whether to use GPU for Faiss."
+    )
+    parser.add_argument(
+        "--qrels", 
+        type=str,
+        help="The qrels file."
+    )
+    parser.add_argument(
+        "--processed_data_dir", 
+        type=str,
+        help="Path to tokenized documents."
+    )
+    parser.add_argument(
+        "--raw_data_dir", 
+        type=str,
+        help="Path to dataset."
+    )
+    parser.add_argument(
+        "--output_file", 
+        type=str,
+        help="Output file for OpenMatch reranking."
+    )
+    parser.add_argument(
+        "--output_trec_file", 
+        type=str,
+        help="TREC-style run file, to be evaluated by the trec_eval tool."
+    )
+    parser.add_argument(
+        "--query",
+        type=str,
+        default="concat",
+        choices=["no_res", "man_can", "auto_can", "target", "output", "raw"],
+        help="Input query format."
+    )
+    parser.add_argument(
+        "--output_query_type",
+        type=str,
+        help="Query to be written in the OpenMatch file."
+    )
+    parser.add_argument(
+        "--fold",
+        type=int, 
+        default=-1,
+        help="Fold to evaluate on; set to -1 to evaluate all folds."
+    )
     parser.add_argument(
         "--model_type",
         default=None,
@@ -390,8 +343,6 @@ def main():
             MSMarcoConfigDict.keys()),
     )
     args = parser.parse_args()
-
-    tb_writer = SummaryWriter(log_dir=args.log_dir) if args.log_dir else None
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     args.n_gpu = 1
@@ -426,7 +377,7 @@ def main():
     with open(args.qrels, 'r', encoding='utf8') as f:
         tsvreader = csv.reader(f, delimiter="\t")
         for [topicid, _, docid, rel] in tsvreader:
-            topicid = int(topicid)
+            topicid = str(topicid)
             docid = int(docid)
             rel = int(rel)
             if topicid not in dev_query_positive_id:
@@ -444,15 +395,14 @@ def main():
 
         config, tokenizer, model = load_model(args, args.model_path)
 	
-        if args.block_size <= 0:
-            args.block_size = tokenizer.max_len_single_sentence
-        args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
+        if args.max_concat_length <= 0:
+            args.max_concat_length = tokenizer.max_len_single_sentence
+        args.max_concat_length = min(args.max_concat_length, tokenizer.max_len_single_sentence)
 
         # eval
         logger.info("Training/evaluation parameters %s", args)
         eval_dataset = ConvSearchDataset([args.eval_file], tokenizer, args, mode="inference")
         total_embedding, total_embedding2id, raw_sequences = evaluate(args, eval_dataset, model, logger)
-        # logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
         total_raw_sequences.extend(raw_sequences)
         del model
         torch.cuda.empty_cache()
@@ -468,15 +418,14 @@ def main():
             suffix = ('-' + str(i))
             config, tokenizer, model = load_model(args, args.model_path + suffix)
 
-            if args.block_size <= 0:
-                args.block_size = tokenizer.max_len_single_sentence
-            args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
+            if args.max_concat_length <= 0:
+                args.max_concat_length = tokenizer.max_len_single_sentence
+            args.max_concat_length = min(args.max_concat_length, tokenizer.max_len_single_sentence)
     
             logger.info("Training/evaluation parameters %s", args)
             eval_file = "%s.%d" % (args.eval_file, i)
             logger.info("eval_file: {}".format(eval_file))
-            train_files = ["%s.%d" % (args.eval_file, j) for j in range(NUM_FOLD) if j != i]
-            eval_dataset = ConvSearchDataset([eval_file], tokenizer, args, mode="inference") if not args.eval_on_train else ConvSearchDataset(train_files, tokenizer, args, mode="inference")
+            eval_dataset = ConvSearchDataset([eval_file], tokenizer, args, mode="inference")
             embedding, embedding2id, raw_sequences = evaluate(args, eval_dataset, model, logger)
             total_embedding.append(embedding)
             total_embedding2id.extend(embedding2id)
@@ -494,11 +443,8 @@ def main():
                     I_nearest_neighbor=merged_I, topN=100,
                     output_file=args.output_file, output_trec_file=args.output_trec_file,
                     offset2pid=offset2pid, raw_data_dir=args.raw_data_dir,
-                    dev_query_name=args.dev_query_name,
+                    output_query_type=args.output_query_type,
                     raw_sequences=total_raw_sequences)
-
-    if args.log_dir:
-        tb_writer.close()
 
 
 if __name__ == "__main__":

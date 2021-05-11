@@ -21,12 +21,14 @@ import torch
 torch.multiprocessing.set_sharing_strategy('file_system')
 from multiprocessing import Process
 from torch.utils.data import DataLoader, Dataset, TensorDataset, IterableDataset
+from utils.dpr_utils import get_model_obj, load_states_from_checkpoint
 import re
 from model.models import MSMarcoConfigDict, ALL_MODELS
 from typing import List, Set, Dict, Tuple, Callable, Iterable, Any
 
 
 logger = logging.getLogger(__name__)
+NUM_FOLD = 5
 
 
 class InputFeaturesPair(object):
@@ -242,6 +244,48 @@ def set_seed(args):
         torch.cuda.manual_seed_all(args.seed)
 
 
+def load_model(args, checkpoint_path):
+    label_list = ["0", "1"]
+    num_labels = len(label_list)
+    args.model_type = args.model_type.lower()
+    configObj = MSMarcoConfigDict[args.model_type]
+    args.model_path = checkpoint_path
+
+    config, tokenizer, model = None, None, None
+    if args.model_type != "dpr":
+        config = configObj.config_class.from_pretrained(
+            args.model_path,
+            num_labels=num_labels,
+            finetuning_task="MSMarco",
+            cache_dir=args.cache_dir if args.cache_dir else None,
+        )
+        tokenizer = configObj.tokenizer_class.from_pretrained(
+            args.model_path,
+            do_lower_case=True,
+            cache_dir=args.cache_dir if args.cache_dir else None,
+        )
+        model = configObj.model_class.from_pretrained(
+            args.model_path,
+            from_tf=bool(".ckpt" in args.model_path),
+            config=config,
+            cache_dir=args.cache_dir if args.cache_dir else None,
+        )
+    else:  # dpr
+        model = configObj.model_class(args)
+        saved_state = load_states_from_checkpoint(checkpoint_path)
+        model_to_load = get_model_obj(model)
+        logger.info('Loading saved model state ...')
+        model_to_load.load_state_dict(saved_state.model_dict)
+        tokenizer = configObj.tokenizer_class.from_pretrained(
+            "bert-base-uncased",
+            do_lower_case=True,
+            cache_dir=None,
+        )
+
+    model.to(args.device)
+    return config, tokenizer, model
+
+
 def is_first_worker():
     return not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0
 
@@ -386,10 +430,10 @@ class ConvSearchDataset(Dataset):
                     target_sent = record['target']
                     auto_sent = record.get('output', "no")
                     raw_sent = record["input"][-1]
-                    responses = record["manual_response"] if args.query == "mc" else (record["automatic_response"] if args.query == "ac" else [])
+                    responses = record["manual_response"] if args.query == "man_can" else (record["automatic_response"] if args.query == "auto_can" else [])
                     topic_number = record.get('topic_number', None)
                     query_number = record.get('query_number', None)
-                    qid = str(topic_number) + "0" + str(query_number) if topic_number != None else str(record["qid"])
+                    qid = str(topic_number) + "_" + str(query_number) if topic_number != None else str(record["qid"])
                     sequences = record['input']
                     concat_ids = []
                     concat_id_mask = []
@@ -401,16 +445,16 @@ class ConvSearchDataset(Dataset):
                         doc_pos = record["doc_pos"]
                         doc_negs = record["doc_negs"]
 
-                    if mode == "train" or args.query in ["concat", "mc", "ac"]: 
+                    if mode == "train" or args.query in ["no_res", "man_can", "auto_can"]: 
                         if args.model_type == "dpr":
-                            concat_ids.append(tokenizer.cls_token_id)  # dpr uses BERT, so use BERT-style sequence
+                            concat_ids.append(tokenizer.cls_token_id)  # dpr (on OR-QuAC) uses BERT-style sequence [CLS] q1 [SEP] q2 [SEP] ...
                         for sent in input_sents[:-1]:  # exlude last one
                             if args.model_type != "dpr":
-                                concat_ids.append(tokenizer.cls_token_id)  # otherwise use RoBERTa-style sequece
+                                concat_ids.append(tokenizer.cls_token_id)  # RoBERTa-style sequence <s> q1 </s> <s> q2 </s> ...
                             concat_ids.extend(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(sent)))
                             concat_ids.append(tokenizer.sep_token_id)
 
-                        if args.y2 and len(responses) >= 2:  # add last response
+                        if args.query in ["man_can", "auto_can"] and len(responses) >= 2:  # add response
                             if args.model_type != "dpr":
                                 concat_ids.append(tokenizer.cls_token_id)
                             concat_ids.extend(tokenizer.convert_tokens_to_ids(["<response>"]))
@@ -422,17 +466,18 @@ class ConvSearchDataset(Dataset):
                             concat_ids.append(tokenizer.cls_token_id)
                         concat_ids.extend(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(input_sents[-1])))
                         concat_ids.append(tokenizer.sep_token_id)
-                            
-                        concat_ids, concat_id_mask = pad_input_ids_with_mask(concat_ids, args.block_size)
-                        assert len(concat_ids) == args.block_size
+                        
+                        # We do not use token type id for BERT (and for RoBERTa, of course)
+                        concat_ids, concat_id_mask = pad_input_ids_with_mask(concat_ids, args.max_concat_length)
+                        assert len(concat_ids) == args.max_concat_length
 
-                    elif args.query == "target":
+                    elif args.query == "target":  # manual
 
                         concat_ids = tokenizer.encode(target_sent, add_special_tokens=True, max_length=args.max_query_length)
                         concat_ids, concat_id_mask = pad_input_ids_with_mask(concat_ids, args.max_query_length)
                         assert len(concat_ids) == args.max_query_length
 
-                    elif args.query == "output":
+                    elif args.query == "output":  # reserved for query rewriter output
 
                         concat_ids = tokenizer.encode(auto_sent, add_special_tokens=True, max_length=args.max_query_length)
                         concat_ids, concat_id_mask = pad_input_ids_with_mask(concat_ids, args.max_query_length)
@@ -445,8 +490,7 @@ class ConvSearchDataset(Dataset):
                         assert len(concat_ids) == args.max_query_length
 
                     else:
-                        print("key error")
-                        exit(1)
+                        raise KeyError("Unsupported query type")
 
                     if mode == "train":
                         target_ids = tokenizer.encode(target_sent if not args.reverse else input_sents[-1], add_special_tokens=True, max_length=args.max_query_length)
@@ -467,7 +511,6 @@ class ConvSearchDataset(Dataset):
     @staticmethod
     def get_collate_fn(args, mode):
         def collate_fn(batch_dataset: list):
-            return_tuple = [[], [], [], [], [], [], []]
             collated_dict = {
                 "qid": [],
                 "concat_ids": [],

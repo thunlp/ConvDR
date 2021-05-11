@@ -3,30 +3,19 @@ import logging
 import os
 import torch
 import random
-import numpy as np
 from tensorboardX import SummaryWriter
 
 from utils.util import pad_input_ids_with_mask, getattr_recursive
 
 from torch.utils.data import DataLoader, RandomSampler
-from utils.dpr_utils import load_states_from_checkpoint, get_model_obj
 from tqdm import tqdm, trange
 from transformers import  AdamW, get_linear_schedule_with_warmup
 from torch import nn
 
 from model.models import MSMarcoConfigDict
-from utils.util import ConvSearchDataset
+from utils.util import ConvSearchDataset, NUM_FOLD, set_seed
 
 logger = logging.getLogger(__name__)
-NUM_FOLD = 5
-
-
-def set_seed(args):
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if args.n_gpu > 0:
-        torch.cuda.manual_seed_all(args.seed)
 
 
 def train(args, train_dataset, model, teacher_model, loss_fn, logger, writer: SummaryWriter, cross_validate_id=-1, loss_fn_2=None, tokenizer=None):
@@ -87,10 +76,10 @@ def train(args, train_dataset, model, teacher_model, loss_fn, logger, writer: Su
     tr_loss, logging_loss = 0.0, 0.0
     tr_loss1, tr_loss2 = 0.0, 0.0
     model.zero_grad()
-    train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
+    train_iterator = trange(int(args.num_train_epochs), desc="Epoch")
     set_seed(args)  # Added here for reproducibility (even between python 2 and 3)
     for _ in train_iterator:
-        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
+        epoch_iterator = tqdm(train_dataloader, desc="Iteration")
         for step, batch in enumerate(epoch_iterator):
             concat_ids, concat_id_mask, target_ids, target_id_mask = (ele.to(args.device) for ele in [batch["concat_ids"], batch["concat_id_mask"], 
                                                                                                       batch["target_ids"], batch["target_id_mask"]])
@@ -195,52 +184,6 @@ def train(args, train_dataset, model, teacher_model, loss_fn, logger, writer: Su
     return global_step, tr_loss / global_step
 
 
-def load_model(args, checkpoint_path):
-    label_list = ["0", "1"]
-    num_labels = len(label_list)
-    args.model_type = args.model_type.lower()
-    configObj = MSMarcoConfigDict[args.model_type]
-    args.model_name_or_path = checkpoint_path
-
-    config, tokenizer, model = None, None, None
-    if args.model_type != "dpr":
-        config = configObj.config_class.from_pretrained(
-            args.model_name_or_path,
-            num_labels=num_labels,
-            finetuning_task="MSMarco",
-            cache_dir=args.cache_dir if args.cache_dir else None,
-        )
-        tokenizer = configObj.tokenizer_class.from_pretrained(
-            args.model_name_or_path,
-            do_lower_case=True,
-            cache_dir=args.cache_dir if args.cache_dir else None,
-        )
-        model = configObj.model_class.from_pretrained(
-            args.model_name_or_path,
-            from_tf=bool(".ckpt" in args.model_name_or_path),
-            config=config,
-            cache_dir=args.cache_dir if args.cache_dir else None,
-        )
-    else:  # dpr
-        model = configObj.model_class(args)
-        saved_state = load_states_from_checkpoint(checkpoint_path)
-        model_to_load = get_model_obj(model)
-        logger.info('Loading saved model state ...')
-        model_to_load.load_state_dict(saved_state.model_dict)
-
-    model.to(args.device)
-    logger.info("Inference parameters %s", args)
-    if args.local_rank != -1:
-        model = torch.nn.parallel.DistributedDataParallel(
-            model,
-            device_ids=[
-                args.local_rank],
-            output_device=args.local_rank,
-            find_unused_parameters=True,
-        )
-    return config, tokenizer, model
-
-
 def main():
     parser = argparse.ArgumentParser()
 
@@ -248,7 +191,7 @@ def main():
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument("--model_name_or_path", type=str,
                         help="The model checkpoint for weights initialization.")
-    parser.add_argument("--block_size", default=256, type=int,
+    parser.add_argument("--max_concat_length", default=256, type=int,
                         help="Optional input sequence length after tokenization."
                              "The training dataset will be truncated in block of this size for training."
                              "Default to the model max input length for single sentence inputs (take into account special tokens).")
@@ -294,8 +237,6 @@ def main():
                         help="Linear warmup over warmup_steps.")
     parser.add_argument('--save_steps', type=int, default=-1,
                         help="Save checkpoint every X updates steps.")
-    parser.add_argument("--local_rank", type=int, default=-1,
-                        help="For distributed training: local_rank")
     parser.add_argument("--no_cuda", action='store_true',
                         help="Avoid using CUDA when available")
     parser.add_argument('--overwrite_output_dir', action='store_true',
@@ -344,9 +285,9 @@ def main():
     if not args.cross_validate:
 
         config, tokenizer, model = load_model(args, args.model_name_or_path)
-        if args.block_size <= 0:
-            args.block_size = tokenizer.max_len_single_sentence
-        args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
+        if args.max_concat_length <= 0:
+            args.max_concat_length = tokenizer.max_len_single_sentence
+        args.max_concat_length = min(args.max_concat_length, tokenizer.max_len_single_sentence)
 
         # Training
         logger.info("Training/evaluation parameters %s", args)
@@ -356,7 +297,7 @@ def main():
 
         # Saving
         # Create output directory if needed
-        if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
+        if not os.path.exists(args.output_dir):
             os.makedirs(args.output_dir)
 
         logger.info("Saving model checkpoint to %s", args.output_dir)
@@ -376,9 +317,9 @@ def main():
                 tokenizer.add_tokens(["<response>"])
                 model.resize_token_embeddings(len(tokenizer)) 
 
-            if args.block_size <= 0:
-                args.block_size = tokenizer.max_len_single_sentence
-            args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
+            if args.max_concat_length <= 0:
+                args.max_concat_length = tokenizer.max_len_single_sentence
+            args.max_concat_length = min(args.max_concat_length, tokenizer.max_len_single_sentence)
     
             logger.info("Training/evaluation parameters %s", args)
             train_files = ["%s.%d" % (args.train_file, j) for j in range(NUM_FOLD) if j != i]
