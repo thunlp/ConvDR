@@ -77,9 +77,23 @@ def preprocess(args):
 
 def PassagePreprocessingFn(args, line, tokenizer):
     line = line.strip()
-    try:
+    ext = args.collection[args.collection.rfind(".")+1:]
+    passage = None
+    if ext == ".jsonl":
         obj = json.loads(line)
-    except ValueError:
+        p_id = int(obj["id"])
+        p_text = obj["text"]
+        p_title = obj["title"]
+
+        full_text = p_text[:args.max_doc_character]
+
+        passage = tokenizer.encode(
+            p_title, 
+            text_pair=full_text,
+            add_special_tokens=True,
+            max_length=args.max_seq_length,
+        )
+    elif ext == ".tsv":
         try:
             line_arr = line.split('\t')
             p_id = int(line_arr[0])
@@ -94,19 +108,8 @@ def PassagePreprocessingFn(args, line, tokenizer):
                 max_length=args.max_seq_length,
             )
     else:
-        p_id = int(obj["id"])
-        p_text = obj["text"]
-        p_title = obj["title"]
+        raise TypeError("Unrecognized file type")
 
-        full_text = p_text[:args.max_doc_character]
-
-        passage = tokenizer.encode(
-            p_title, 
-            text_pair=full_text,
-            add_special_tokens=True,
-            max_length=args.max_seq_length,
-        )
-        
     passage_len = min(len(passage), args.max_seq_length)
     input_id_b = pad_input_ids(passage, args.max_seq_length)
 
@@ -235,15 +238,6 @@ def get_arguments():
         help="The output data dir",
     )
     parser.add_argument(
-        "--model_type",
-        default=None,
-        type=str,
-        required=True,
-        help="Model type selected in the list: " +
-        ", ".join(
-            MSMarcoConfigDict.keys()),
-    )
-    parser.add_argument(
         "--model_name_or_path",
         default=None,
         type=str,
@@ -253,7 +247,7 @@ def get_arguments():
     )
     parser.add_argument(
         "--max_seq_length",
-        default=128,
+        default=512,
         type=int,
         help="The maximum total input sequence length after tokenization. Sequences longer "
         "than this will be truncated, sequences shorter will be padded.",

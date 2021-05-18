@@ -1,4 +1,5 @@
 import sys
+
 sys.path += ['../']
 # import pandas as pd
 # from sklearn.metrics import roc_curve, auc
@@ -18,6 +19,7 @@ import pytrec_eval
 import pickle
 import numpy as np
 import torch
+
 torch.multiprocessing.set_sharing_strategy('file_system')
 from multiprocessing import Process
 from torch.utils.data import DataLoader, Dataset, TensorDataset, IterableDataset
@@ -25,7 +27,6 @@ from utils.dpr_utils import get_model_obj, load_states_from_checkpoint
 import re
 from model.models import MSMarcoConfigDict, ALL_MODELS
 from typing import List, Set, Dict, Tuple, Callable, Iterable, Any
-
 
 logger = logging.getLogger(__name__)
 NUM_FOLD = 5
@@ -43,16 +44,14 @@ class InputFeaturesPair(object):
         token_type_ids: Segment token indices to indicate first and second portions of the inputs.
         label: Label corresponding to the input
     """
-
-    def __init__(
-            self,
-            input_ids_a,
-            attention_mask_a=None,
-            token_type_ids_a=None,
-            input_ids_b=None,
-            attention_mask_b=None,
-            token_type_ids_b=None,
-            label=None):
+    def __init__(self,
+                 input_ids_a,
+                 attention_mask_a=None,
+                 token_type_ids_a=None,
+                 input_ids_b=None,
+                 attention_mask_b=None,
+                 token_type_ids_b=None,
+                 label=None):
 
         self.input_ids_a = input_ids_a
         self.attention_mask_a = attention_mask_a
@@ -86,14 +85,13 @@ def getattr_recursive(obj, name):
     return obj
 
 
-def barrier_array_merge(
-        args,
-        data_array,
-        merge_axis=0,
-        prefix="",
-        load_cache=False,
-        only_load_in_master=False,
-        merge=True):
+def barrier_array_merge(args,
+                        data_array,
+                        merge_axis=0,
+                        prefix="",
+                        load_cache=False,
+                        only_load_in_master=False,
+                        merge=True):
     # data array: [B, any dimension]
     # merge alone one axis
 
@@ -108,10 +106,7 @@ def barrier_array_merge(
 
         dist.barrier()  # directory created
         pickle_path = os.path.join(
-            args.output_dir,
-            "{1}_data_obj_{0}.pb".format(
-                str(rank),
-                prefix))
+            args.output_dir, "{1}_data_obj_{0}.pb".format(str(rank), prefix))
         with open(pickle_path, 'wb') as handle:
             pickle.dump(data_array, handle, protocol=4)
 
@@ -132,13 +127,10 @@ def barrier_array_merge(
             dist.barrier()
             return None
 
-    for i in range(
-            args.world_size):  # TODO: dynamically find the max instead of HardCode
+    for i in range(args.world_size
+                   ):  # TODO: dynamically find the max instead of HardCode
         pickle_path = os.path.join(
-            args.output_dir,
-            "{1}_data_obj_{0}.pb".format(
-                str(i),
-                prefix))
+            args.output_dir, "{1}_data_obj_{0}.pb".format(str(i), prefix))
         try:
             with open(pickle_path, 'rb') as handle:
                 b = pickle.load(handle)
@@ -151,9 +143,7 @@ def barrier_array_merge(
     return data_array_agg
 
 
-def pad_input_ids(input_ids, max_length,
-                  pad_on_left=False,
-                  pad_token=0):
+def pad_input_ids(input_ids, max_length, pad_on_left=False, pad_token=0):
     padding_length = max_length - len(input_ids)
     padding_id = [pad_token] * padding_length
 
@@ -169,10 +159,11 @@ def pad_input_ids(input_ids, max_length,
 
     return input_ids
 
-    
-def pad_input_ids_with_mask(input_ids, max_length,
-                  pad_on_left=False,
-                  pad_token=0):
+
+def pad_input_ids_with_mask(input_ids,
+                            max_length,
+                            pad_on_left=False,
+                            pad_token=0):
     padding_length = max_length - len(input_ids)
     padding_id = [pad_token] * padding_length
 
@@ -194,7 +185,10 @@ def pad_input_ids_with_mask(input_ids, max_length,
     return input_ids, attention_mask
 
 
-def pad_ids(input_ids, attention_mask, token_type_ids, max_length,
+def pad_ids(input_ids,
+            attention_mask,
+            token_type_ids,
+            max_length,
             pad_on_left=False,
             pad_token=0,
             pad_token_segment_id=0,
@@ -287,7 +281,8 @@ def load_model(args, checkpoint_path):
 
 
 def is_first_worker():
-    return not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0
+    return not dist.is_available() or not dist.is_initialized(
+    ) or dist.get_rank() == 0
 
 
 def concat_key(all_list, key, axis=0):
@@ -304,14 +299,17 @@ def get_latest_ann_data(ann_data_path):
         return -1, None, None
     files = list(next(os.walk(ann_data_path))[2])
     num_start_pos = len(ANN_PREFIX)
-    data_no_list = [int(s[num_start_pos:])
-                    for s in files if s[:num_start_pos] == ANN_PREFIX]
+    data_no_list = [
+        int(s[num_start_pos:]) for s in files
+        if s[:num_start_pos] == ANN_PREFIX
+    ]
     if len(data_no_list) > 0:
         data_no = max(data_no_list)
-        with open(os.path.join(ann_data_path, ANN_PREFIX + str(data_no)), 'r') as f:
+        with open(os.path.join(ann_data_path, ANN_PREFIX + str(data_no)),
+                  'r') as f:
             ndcg_json = json.load(f)
-        return data_no, os.path.join(
-            ann_data_path, "ann_training_data_" + str(data_no)), ndcg_json
+        return data_no, os.path.join(ann_data_path, "ann_training_data_" +
+                                     str(data_no)), ndcg_json
     return -1, None, None
 
 
@@ -326,6 +324,32 @@ def numbered_byte_file_generator(base_path, file_no, record_size):
                 yield b
 
 
+def load_collection(collection_file):
+    all_passages = ["[INVALID DOC ID]"] * 4000_0000
+    ext = collection_file[collection_file.rfind(".") + 1:]
+    if ext not in ["jsonl", "tsv"]:
+        raise TypeError("Unrecognized file type")
+    with open(collection_file, "r") as f:
+        if ext == "jsonl":
+            for line in f:
+                line = line.strip()
+                obj = json.loads(line)
+                pid = int(obj["id"])
+                passage = obj["title"] + "[SEP]" + obj["text"]
+                all_passages[pid] = passage
+        else:
+            for line in f:
+                line = line.strip()
+                try:
+                    line_arr = line.split("\t")
+                    pid = int(line_arr[0])
+                    passage = line_arr[1].rstrip()
+                    all_passages[pid] = passage
+                except IndexError:
+                    pass
+    return all_passages
+
+
 class EmbeddingCache:
     def __init__(self, base_path, seed=-1):
         self.base_path = base_path
@@ -336,8 +360,8 @@ class EmbeddingCache:
             self.record_size = int(
                 meta['embedding_size']) * self.dtype.itemsize + 4
         if seed >= 0:
-            self.ix_array = np.random.RandomState(
-                seed).permutation(self.total_number)
+            self.ix_array = np.random.RandomState(seed).permutation(
+                self.total_number)
         else:
             self.ix_array = np.arange(self.total_number)
         self.f = None
@@ -364,8 +388,8 @@ class EmbeddingCache:
     def __getitem__(self, key):
         if key < 0 or key > self.total_number:
             raise IndexError(
-                "Index {} is out of bound for cached embeddings of size {}".format(
-                    key, self.total_number))
+                "Index {} is out of bound for cached embeddings of size {}".
+                format(key, self.total_number))
         self.f.seek(key * self.record_size)
         return self.read_single_record()
 
@@ -404,11 +428,15 @@ class StreamingDataset(IterableDataset):
 
 
 class ConvSearchExample:
-    def __init__(self, qid, 
-                       concat_ids, concat_id_mask, 
-                       target_ids, target_id_mask, 
-                       doc_pos=None, doc_negs=None,
-                       raw_sequences=None):
+    def __init__(self,
+                 qid,
+                 concat_ids,
+                 concat_id_mask,
+                 target_ids,
+                 target_id_mask,
+                 doc_pos=None,
+                 doc_negs=None,
+                 raw_sequences=None):
         self.qid = qid
         self.concat_ids = concat_ids
         self.concat_id_mask = concat_id_mask
@@ -430,10 +458,15 @@ class ConvSearchDataset(Dataset):
                     target_sent = record['target']
                     auto_sent = record.get('output', "no")
                     raw_sent = record["input"][-1]
-                    responses = record["manual_response"] if args.query == "man_can" else (record["automatic_response"] if args.query == "auto_can" else [])
+                    responses = record[
+                        "manual_response"] if args.query == "man_can" else (
+                            record["automatic_response"]
+                            if args.query == "auto_can" else [])
                     topic_number = record.get('topic_number', None)
                     query_number = record.get('query_number', None)
-                    qid = str(topic_number) + "_" + str(query_number) if topic_number != None else str(record["qid"])
+                    qid = str(topic_number) + "_" + str(
+                        query_number) if topic_number != None else str(
+                            record["qid"])
                     sequences = record['input']
                     concat_ids = []
                     concat_id_mask = []
@@ -445,62 +478,95 @@ class ConvSearchDataset(Dataset):
                         doc_pos = record["doc_pos"]
                         doc_negs = record["doc_negs"]
 
-                    if mode == "train" or args.query in ["no_res", "man_can", "auto_can"]: 
+                    if mode == "train" or args.query in [
+                            "no_res", "man_can", "auto_can"
+                    ]:
                         if args.model_type == "dpr":
-                            concat_ids.append(tokenizer.cls_token_id)  # dpr (on OR-QuAC) uses BERT-style sequence [CLS] q1 [SEP] q2 [SEP] ...
+                            concat_ids.append(
+                                tokenizer.cls_token_id
+                            )  # dpr (on OR-QuAC) uses BERT-style sequence [CLS] q1 [SEP] q2 [SEP] ...
                         for sent in input_sents[:-1]:  # exlude last one
                             if args.model_type != "dpr":
-                                concat_ids.append(tokenizer.cls_token_id)  # RoBERTa-style sequence <s> q1 </s> <s> q2 </s> ...
-                            concat_ids.extend(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(sent)))
+                                concat_ids.append(
+                                    tokenizer.cls_token_id
+                                )  # RoBERTa-style sequence <s> q1 </s> <s> q2 </s> ...
+                            concat_ids.extend(
+                                tokenizer.convert_tokens_to_ids(
+                                    tokenizer.tokenize(sent)))
                             concat_ids.append(tokenizer.sep_token_id)
 
-                        if args.query in ["man_can", "auto_can"] and len(responses) >= 2:  # add response
+                        if args.query in [
+                                "man_can", "auto_can"
+                        ] and len(responses) >= 2:  # add response
                             if args.model_type != "dpr":
                                 concat_ids.append(tokenizer.cls_token_id)
-                            concat_ids.extend(tokenizer.convert_tokens_to_ids(["<response>"]))
-                            concat_ids.extend(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(responses[-2])))
+                            concat_ids.extend(
+                                tokenizer.convert_tokens_to_ids(["<response>"
+                                                                 ]))
+                            concat_ids.extend(
+                                tokenizer.convert_tokens_to_ids(
+                                    tokenizer.tokenize(responses[-2])))
                             concat_ids.append(tokenizer.sep_token_id)
                             sequences.insert(-1, responses[-2])
 
                         if args.model_type != "dpr":
                             concat_ids.append(tokenizer.cls_token_id)
-                        concat_ids.extend(tokenizer.convert_tokens_to_ids(tokenizer.tokenize(input_sents[-1])))
+                        concat_ids.extend(
+                            tokenizer.convert_tokens_to_ids(
+                                tokenizer.tokenize(input_sents[-1])))
                         concat_ids.append(tokenizer.sep_token_id)
-                        
+
                         # We do not use token type id for BERT (and for RoBERTa, of course)
-                        concat_ids, concat_id_mask = pad_input_ids_with_mask(concat_ids, args.max_concat_length)
+                        concat_ids, concat_id_mask = pad_input_ids_with_mask(
+                            concat_ids, args.max_concat_length)
                         assert len(concat_ids) == args.max_concat_length
 
                     elif args.query == "target":  # manual
 
-                        concat_ids = tokenizer.encode(target_sent, add_special_tokens=True, max_length=args.max_query_length)
-                        concat_ids, concat_id_mask = pad_input_ids_with_mask(concat_ids, args.max_query_length)
+                        concat_ids = tokenizer.encode(
+                            target_sent,
+                            add_special_tokens=True,
+                            max_length=args.max_query_length)
+                        concat_ids, concat_id_mask = pad_input_ids_with_mask(
+                            concat_ids, args.max_query_length)
                         assert len(concat_ids) == args.max_query_length
 
                     elif args.query == "output":  # reserved for query rewriter output
 
-                        concat_ids = tokenizer.encode(auto_sent, add_special_tokens=True, max_length=args.max_query_length)
-                        concat_ids, concat_id_mask = pad_input_ids_with_mask(concat_ids, args.max_query_length)
+                        concat_ids = tokenizer.encode(
+                            auto_sent,
+                            add_special_tokens=True,
+                            max_length=args.max_query_length)
+                        concat_ids, concat_id_mask = pad_input_ids_with_mask(
+                            concat_ids, args.max_query_length)
                         assert len(concat_ids) == args.max_query_length
 
                     elif args.query == "raw":
 
-                        concat_ids = tokenizer.encode(raw_sent, add_special_tokens=True, max_length=args.max_query_length)
-                        concat_ids, concat_id_mask = pad_input_ids_with_mask(concat_ids, args.max_query_length)
+                        concat_ids = tokenizer.encode(
+                            raw_sent,
+                            add_special_tokens=True,
+                            max_length=args.max_query_length)
+                        concat_ids, concat_id_mask = pad_input_ids_with_mask(
+                            concat_ids, args.max_query_length)
                         assert len(concat_ids) == args.max_query_length
 
                     else:
                         raise KeyError("Unsupported query type")
 
                     if mode == "train":
-                        target_ids = tokenizer.encode(target_sent if not args.reverse else input_sents[-1], add_special_tokens=True, max_length=args.max_query_length)
-                        target_ids, target_id_mask = pad_input_ids_with_mask(target_ids, args.max_query_length)
+                        target_ids = tokenizer.encode(
+                            target_sent,
+                            add_special_tokens=True,
+                            max_length=args.max_query_length)
+                        target_ids, target_id_mask = pad_input_ids_with_mask(
+                            target_ids, args.max_query_length)
                         assert len(target_ids) == args.max_query_length
 
-                    self.examples.append(ConvSearchExample(qid, 
-                                                           concat_ids, concat_id_mask, 
-                                                           target_ids, target_id_mask, 
-                                                           doc_pos, doc_negs, sequences))
+                    self.examples.append(
+                        ConvSearchExample(qid, concat_ids, concat_id_mask,
+                                          target_ids, target_id_mask, doc_pos,
+                                          doc_negs, sequences))
 
     def __len__(self):
         return len(self.examples)
@@ -517,42 +583,35 @@ class ConvSearchDataset(Dataset):
                 "concat_id_mask": [],
             }
             if mode == "train":
-                collated_dict.update(
-                    {
-                        "target_ids": [],
-                        "target_id_mask": []
-                    }
-                )
+                collated_dict.update({"target_ids": [], "target_id_mask": []})
                 if args.ranking_task:
-                    collated_dict.update(
-                        {
-                            "documents": []
-                        }
-                    )
+                    collated_dict.update({"documents": []})
             else:
-                collated_dict.update(
-                    {
-                        "history_utterances": []
-                    }
-                )
+                collated_dict.update({"history_utterances": []})
             for example in batch_dataset:
                 collated_dict["qid"].append(example.qid)
                 collated_dict["concat_ids"].append(example.concat_ids)
                 collated_dict["concat_id_mask"].append(example.concat_id_mask)
                 if mode == "train":
                     collated_dict["target_ids"].append(example.target_ids)
-                    collated_dict["target_id_mask"].append(example.target_id_mask)
+                    collated_dict["target_id_mask"].append(
+                        example.target_id_mask)
                     if args.ranking_task:
-                        collated_dict["documents"].append([example.doc_pos] + example.doc_negs)
+                        collated_dict["documents"].append([example.doc_pos] +
+                                                          example.doc_negs)
                 else:
-                    collated_dict["history_utterances"].append(example.raw_sequences)
-            should_be_tensor = ["concat_ids", "concat_id_mask", "target_ids", "target_id_mask"]
+                    collated_dict["history_utterances"].append(
+                        example.raw_sequences)
+            should_be_tensor = [
+                "concat_ids", "concat_id_mask", "target_ids", "target_id_mask"
+            ]
             for key in should_be_tensor:
                 if key in collated_dict:
-                    collated_dict[key] = torch.tensor(collated_dict[key], dtype=torch.long)
+                    collated_dict[key] = torch.tensor(collated_dict[key],
+                                                      dtype=torch.long)
 
             return collated_dict
-        
+
         return collate_fn
 
 
@@ -577,20 +636,20 @@ def tokenize_to_file(args, i, num_process, in_path, out_path, line_fn):
             else:
                 out_f.write(res)
 
+
 #                      args, 32,        , collection.tsv, passages,
 def multi_file_process(args, num_process, in_path, out_path, line_fn):
     processes = []
     for i in range(num_process):
-        p = Process(
-            target=tokenize_to_file,
-            args=(
-                args,
-                i,
-                num_process,
-                in_path,
-                out_path,
-                line_fn,
-            ))
+        p = Process(target=tokenize_to_file,
+                    args=(
+                        args,
+                        i,
+                        num_process,
+                        in_path,
+                        out_path,
+                        line_fn,
+                    ))
         processes.append(p)
         p.start()
     for p in processes:
@@ -626,9 +685,9 @@ def all_gather(data):
     # gathering tensors of different shapes
     tensor_list = []
     for _ in size_list:
-        tensor_list.append(torch.ByteTensor(size=(max_size,)).to("cuda"))
+        tensor_list.append(torch.ByteTensor(size=(max_size, )).to("cuda"))
     if local_size != max_size:
-        padding = torch.ByteTensor(size=(max_size - local_size,)).to("cuda")
+        padding = torch.ByteTensor(size=(max_size - local_size, )).to("cuda")
         tensor = torch.cat((tensor, padding), dim=0)
     dist.all_gather(tensor_list, tensor)
 

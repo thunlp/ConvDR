@@ -4,7 +4,6 @@ import json
 from tqdm import tqdm
 import pickle
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--orquac_dir", type=str)
@@ -25,7 +24,12 @@ if __name__ == "__main__":
             obj = json.loads(line)
             passage = obj['text'].replace('\n', ' ').replace('\t', ' ')
             pid = obj['id']
-            g.write(json.dumps({"id": idx, "title": obj["title"], "text": passage}) + "\n")
+            g.write(
+                json.dumps({
+                    "id": idx,
+                    "title": obj["title"],
+                    "text": passage
+                }) + "\n")
             passage_id_to_idx[pid] = idx
             idx += 1
 
@@ -36,10 +40,13 @@ if __name__ == "__main__":
     for target in targets:
         print(f"Processing {target}.txt")
         train = os.path.join(args.orquac_dir, "preprocessed", f"{target}.txt")
-        queries_manual = os.path.join(args.output_dir, f"queries.{target}.manual.tsv")
-        queries_raw = os.path.join(args.output_dir, f"queries.{target}.raw.tsv")
+        queries_manual = os.path.join(args.output_dir,
+                                      f"queries.{target}.manual.tsv")
+        queries_raw = os.path.join(args.output_dir,
+                                   f"queries.{target}.raw.tsv")
         cqr = os.path.join(args.output_dir, "{}.jsonl".format(target))
-        with open(train, "r") as f, open(queries_manual, "w") as g, open(cqr, "w") as h, open(queries_raw, "w") as i:
+        with open(train, "r") as f, open(queries_manual, "w") as g, open(
+                cqr, "w") as h, open(queries_raw, "w") as i:
             responses = []
             last_dialog_id = None
             for line in f:
@@ -56,11 +63,17 @@ if __name__ == "__main__":
                 for his in obj["history"]:
                     input_sents.append(his["question"])
                 input_sents.append(obj["question"])
-                h.write(json.dumps({"qid": qid, "input": input_sents, "target": query, "manual_response": responses}) + "\n")
+                h.write(
+                    json.dumps({
+                        "qid": qid,
+                        "input": input_sents,
+                        "target": query,
+                        "manual_response": responses
+                    }) + "\n")
                 g.write(f"{qid}\t{query}\n")
                 i.write(f"{qid}\t{raw_query}\n")
                 qids_set[target].add(qid)
-                idx += 1 
+                idx += 1
 
     # qrels.txt -> qrels.train.tsv
     print("Processing qrels.txt...")

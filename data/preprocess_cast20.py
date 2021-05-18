@@ -6,8 +6,9 @@ import os
 import json
 import copy
 from utils.util import NUM_FOLD
+
 topic_range = range(81, 106)
-fold_dict = {x: (x-81)//NUM_FOLD for x in topic_range}
+fold_dict = {x: (x - 81) // NUM_FOLD for x in topic_range}
 
 
 def parse_sim_file(filename):
@@ -32,6 +33,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--car_cbor", type=str)
     parser.add_argument("--msmarco_collection", type=str)
+    parser.add_argument("--duplicate_file", type=str)
     parser.add_argument("--cast_dir", type=str)
 
     parser.add_argument("--out_data_dir", type=str)
@@ -39,25 +41,32 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # INPUT
-    sim_file = os.path.join(args.cast_dir, "duplicate_list_v1.0.txt")
-    cast_topics_automatic_file = os.path.join(args.cast_dir, "2020_automatic_evaluation_topics_v1.0.json")
-    cast_topics_manual_file = os.path.join(args.cast_dir, "2020_manual_evaluation_topics_v1.0.json")
+    sim_file = args.duplicate_file
+    cast_topics_automatic_file = os.path.join(
+        args.cast_dir, "2020_automatic_evaluation_topics_v1.0.json")
+    cast_topics_manual_file = os.path.join(
+        args.cast_dir, "2020_manual_evaluation_topics_v1.0.json")
     cast_qrels_file = os.path.join(args.cast_dir, "2020qrels.txt")
 
     # OUTPUT
     out_topics_file = os.path.join(args.out_data_dir, "eval_topics.jsonl")
     out_raw_queries_file = os.path.join(args.out_data_dir, "queries.raw.tsv")
-    out_manual_queries_file = os.path.join(args.out_data_dir, "queries.manual.tsv")
+    out_manual_queries_file = os.path.join(args.out_data_dir,
+                                           "queries.manual.tsv")
     out_qrels_file = os.path.join(args.out_data_dir, "qrels.tsv")
-    car_id_to_idx_file = os.path.join(args.out_collection_dir, "car_id_to_idx.pickle")
-    car_idx_to_id_file = os.path.join(args.out_collection_dir, "car_idx_to_id.pickle")
-    out_collection_file = os.path.join(args.out_collection_dir, "collection.tsv")
+    car_id_to_idx_file = os.path.join(args.out_collection_dir,
+                                      "car_id_to_idx.pickle")
+    car_idx_to_id_file = os.path.join(args.out_collection_dir,
+                                      "car_idx_to_id.pickle")
+    out_collection_file = os.path.join(args.out_collection_dir,
+                                       "collection.tsv")
 
     # 1. Combine TREC-CAR & MS MARCO, remove duplicate passages, assign new ids
     car_id_to_idx = {}
     car_idx_to_id = []
     collection = ["xx"] * 4000_0000
-    if os.path.exists(out_collection_file) and os.path.exists(car_id_to_idx_file) and os.path.exists(car_idx_to_id_file):
+    if os.path.exists(out_collection_file) and os.path.exists(
+            car_id_to_idx_file) and os.path.exists(car_idx_to_id_file):
         print("Preprocessed collection found. Loading car_id_to_idx...")
         with open(car_id_to_idx_file, "rb") as f:
             car_id_to_idx = pickle.load(f)
@@ -79,12 +88,15 @@ if __name__ == "__main__":
         i = 0
         with open(car_idx_to_id_file, "w") as f:
             print("Processing TREC-CAR...")
-            for para in tqdm(read_data.iter_paragraphs(open(args.car_cbor, 'rb'))):
+            for para in tqdm(
+                    read_data.iter_paragraphs(open(args.car_cbor, 'rb'))):
                 car_id = "CAR_" + para.para_id
                 text = para.get_text()
-                text = text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+                text = text.replace("\t", " ").replace("\n",
+                                                       " ").replace("\r", " ")
                 idx = car_base_id + i
-                car_id_to_idx[car_id] = idx  # e.g. CAR_76a4a716d4b1b01995c6663ee16e94b4ca35fdd3 -> 10000044
+                car_id_to_idx[
+                    car_id] = idx  # e.g. CAR_76a4a716d4b1b01995c6663ee16e94b4ca35fdd3 -> 10000044
                 collection[idx] = text
                 car_idx_to_id.append(car_id)
                 f.write("{}\t{}\n".format(idx, text))
@@ -105,9 +117,10 @@ if __name__ == "__main__":
             pickle.dump(car_id_to_idx, f)
         with open(car_idx_to_id_file, "wb") as f:
             pickle.dump(car_idx_to_id, f)
-    
+
     # 2. Process queries
     print("Processing CAsT utterances...")
+
     def get_text_by_raw_id(raw_id):
         new_id = None
         if raw_id.startswith("MARCO_"):
@@ -149,11 +162,13 @@ if __name__ == "__main__":
             target = manual_turn["manual_rewritten_utterance"]
 
             manual_res_ids.append(manual_turn["manual_canonical_result_id"])
-            response = get_text_by_raw_id(manual_turn["manual_canonical_result_id"])
+            response = get_text_by_raw_id(
+                manual_turn["manual_canonical_result_id"])
             manual_responses.append(response)
 
             auto_res_ids.append(auto_turn["automatic_canonical_result_id"])
-            response = get_text_by_raw_id(auto_turn["automatic_canonical_result_id"])
+            response = get_text_by_raw_id(
+                auto_turn["automatic_canonical_result_id"])
             auto_responses.append(response)
 
             output_dict = {
@@ -171,12 +186,17 @@ if __name__ == "__main__":
             out_topics.write(dumped_str)
             if fold_dict[topic_number] != cur_fold:
                 out_topics_fold.close()
-                out_topics_fold = open(out_topics_file + "." + str(fold_dict[topic_number]), "w")
+                out_topics_fold = open(
+                    out_topics_file + "." + str(fold_dict[topic_number]), "w")
                 cur_fold = fold_dict[topic_number]
             out_topics_fold.write(dumped_str)
 
-            out_raw_queries.write(str(topic_number) + "_" + str(query_number) + "\t" + raw + "\n")
-            out_manual_queries.write(str(topic_number) + "_" + str(query_number) + "\t" + target + "\n")
+            out_raw_queries.write(
+                str(topic_number) + "_" + str(query_number) + "\t" + raw +
+                "\n")
+            out_manual_queries.write(
+                str(topic_number) + "_" + str(query_number) + "\t" + target +
+                "\n")
 
     # 3. Process and convert qrels
     print("Processing qrels...")

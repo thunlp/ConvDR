@@ -1,21 +1,14 @@
-import pickle
 import sys
+
 sys.path += ['../']
 import torch
 import os
-import faiss
 from utils.util import (
     barrier_array_merge,
-    convert_to_string_id,
-    is_first_worker,
     StreamingDataset,
     EmbeddingCache,
-    get_checkpoint_no,
-    get_latest_ann_data
 )
-import csv
-import copy
-from data.tokenize import GetProcessingFn  
+from data.tokenize import GetProcessingFn
 from model.models import MSMarcoConfigDict
 from torch import nn
 import torch.distributed as dist
@@ -24,13 +17,10 @@ from torch.utils.data import DataLoader
 import numpy as np
 import argparse
 import logging
-import random
-import time
-from utils.msmarco_eval import compute_metrics
 from utils.dpr_utils import load_states_from_checkpoint, get_model_obj
 import re
-torch.multiprocessing.set_sharing_strategy('file_system')
 
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +63,7 @@ def load_model(args, checkpoint_path):
     if args.local_rank != -1:
         model = torch.nn.parallel.DistributedDataParallel(
             model,
-            device_ids=[
-                args.local_rank],
+            device_ids=[args.local_rank],
             output_device=args.local_rank,
             find_unused_parameters=True,
         )
@@ -82,11 +71,11 @@ def load_model(args, checkpoint_path):
 
 
 def InferenceEmbeddingFromStreamDataLoader(
-        args,
-        model,
-        train_dataloader,
-        is_query_inference=True,
-        prefix=""):
+    args,
+    model,
+    train_dataloader,
+    is_query_inference=True,
+):
     # expect dataset from ReconstructTrainingSet
     results = {}
     eval_batch_size = args.per_gpu_eval_batch_size
@@ -104,8 +93,7 @@ def InferenceEmbeddingFromStreamDataLoader(
 
     for batch in tqdm(train_dataloader,
                       desc="Inferencing",
-                      disable=args.local_rank not in [-1,
-                                                      0],
+                      disable=args.local_rank not in [-1, 0],
                       position=0,
                       leave=True):
 
@@ -116,7 +104,8 @@ def InferenceEmbeddingFromStreamDataLoader(
         with torch.no_grad():
             inputs = {
                 "input_ids": batch[0].long(),
-                "attention_mask": batch[1].long()}
+                "attention_mask": batch[1].long()
+            }
             if is_query_inference:
                 embs = model.module.query_emb(**inputs)
             else:
@@ -139,56 +128,68 @@ def InferenceEmbeddingFromStreamDataLoader(
 
 
 # streaming inference
-def StreamInferenceDoc(args, model, fn, prefix, f, is_query_inference=True, merge=True):
+def StreamInferenceDoc(args,
+                       model,
+                       fn,
+                       prefix,
+                       f,
+                       is_query_inference=True,
+                       merge=True):
     inference_batch_size = args.per_gpu_eval_batch_size  # * max(1, args.n_gpu)
     inference_dataset = StreamingDataset(f, fn)
-    inference_dataloader = DataLoader(
-        inference_dataset,
-        batch_size=inference_batch_size)
+    inference_dataloader = DataLoader(inference_dataset,
+                                      batch_size=inference_batch_size)
 
     if args.local_rank != -1:
         dist.barrier()  # directory created
 
     _embedding, _embedding2id = InferenceEmbeddingFromStreamDataLoader(
-        args, model, inference_dataloader, is_query_inference=is_query_inference, prefix=prefix)
+        args,
+        model,
+        inference_dataloader,
+        is_query_inference=is_query_inference,
+        prefix=prefix)
 
     logger.info("merging embeddings")
 
     # preserve to memory
-    full_embedding = barrier_array_merge(
-        args,
-        _embedding,
-        prefix=prefix +
-        "_emb_p_",
-        load_cache=False,
-        only_load_in_master=True,
-        merge=merge)
-    full_embedding2id = barrier_array_merge(
-        args,
-        _embedding2id,
-        prefix=prefix +
-        "_embid_p_",
-        load_cache=False,
-        only_load_in_master=True,
-        merge=merge)
+    full_embedding = barrier_array_merge(args,
+                                         _embedding,
+                                         prefix=prefix + "_emb_p_",
+                                         load_cache=False,
+                                         only_load_in_master=True,
+                                         merge=merge)
+    full_embedding2id = barrier_array_merge(args,
+                                            _embedding2id,
+                                            prefix=prefix + "_embid_p_",
+                                            load_cache=False,
+                                            only_load_in_master=True,
+                                            merge=merge)
 
     return full_embedding, full_embedding2id
 
 
 def generate_new_ann(
-        args,
-        checkpoint_path,
-        ):
+    args,
+    checkpoint_path,
+):
 
     _, __, model = load_model(args, checkpoint_path)
     merge = False
 
     logger.info("***** inference of passages *****")
-    passage_collection_path = os.path.join(args.data_dir, args.tok_type + "_passages")
+    passage_collection_path = os.path.join(args.data_dir,
+                                           args.tok_type + "_passages")
     passage_cache = EmbeddingCache(passage_collection_path)
     with passage_cache as emb:
-        passage_embedding, passage_embedding2id = StreamInferenceDoc(args, model, GetProcessingFn(
-            args, query=False), "passage_", emb, is_query_inference=False, merge=merge)
+        passage_embedding, passage_embedding2id = StreamInferenceDoc(
+            args,
+            model,
+            GetProcessingFn(args, query=False),
+            "passage_",
+            emb,
+            is_query_inference=False,
+            merge=merge)
     logger.info("***** Done passage inference *****")
 
 
@@ -218,8 +219,7 @@ def get_arguments():
         type=str,
         required=True,
         help="Model type selected in the list: " +
-        ", ".join(
-            MSMarcoConfigDict.keys()),
+        ", ".join(MSMarcoConfigDict.keys()),
     )
 
     parser.add_argument(
@@ -242,7 +242,8 @@ def get_arguments():
         "--max_seq_length",
         default=512,
         type=int,
-        help="The maximum total input sequence length after tokenization. Sequences longer "
+        help=
+        "The maximum total input sequence length after tokenization. Sequences longer "
         "than this will be truncated, sequences shorter will be padded.",
     )
 
@@ -250,7 +251,8 @@ def get_arguments():
         "--max_query_length",
         default=64,
         type=int,
-        help="The maximum total input sequence length after tokenization. Sequences longer "
+        help=
+        "The maximum total input sequence length after tokenization. Sequences longer "
         "than this will be truncated, sequences shorter will be padded.",
     )
 
@@ -263,7 +265,7 @@ def get_arguments():
 
     parser.add_argument(
         "--per_gpu_eval_batch_size",
-        default=128,
+        default=64,
         type=int,
         help="The starting output file number",
     )
@@ -273,14 +275,14 @@ def get_arguments():
         action="store_true",
         help="Avoid using CUDA when available",
     )
-    
+
     parser.add_argument(
-        "--local_rank", 
-        type=int, 
-        default=-1, 
+        "--local_rank",
+        type=int,
+        default=-1,
         help="For distributed training: local_rank",
     )
-    
+
     parser.add_argument(
         "--server_ip",
         type=str,
@@ -303,8 +305,8 @@ def get_arguments():
 def set_env(args):
     # Setup CUDA, GPU & distributed training
     if args.local_rank == -1 or args.no_cuda:
-        device = torch.device(
-            "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+        device = torch.device("cuda" if torch.cuda.is_available()
+                              and not args.no_cuda else "cpu")
         args.n_gpu = torch.cuda.device_count()
     else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
         torch.cuda.set_device(args.local_rank)

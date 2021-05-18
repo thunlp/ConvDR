@@ -84,12 +84,7 @@ def get_optimizer(args, model: nn.Module, weight_decay: float = 0.0, ) -> torch.
          'weight_decay': weight_decay},
         {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
-    if args.optimizer == "adamW":
-        return AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
-    elif args.optimizer == "lamb":
-        return Lamb(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
-    else:
-        raise Exception("optimizer {0} not recognized! Can only be lamb or adamW".format(args.optimizer))
+    return AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
 
 
 def all_gather_list(data, group=None, max_size=16384):

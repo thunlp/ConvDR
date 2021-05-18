@@ -30,6 +30,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--car_cbor", type=str)
     parser.add_argument("--msmarco_collection", type=str)
+    parser.add_argument("--duplicate_file", type=str)
     parser.add_argument("--cast_dir", type=str)
 
     parser.add_argument("--out_data_dir", type=str)
@@ -37,24 +38,31 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # INPUT
-    sim_file = os.path.join(args.cast_dir, "duplicate_list_v1.0.txt")
-    cast_topics_raw_file = os.path.join(args.cast_dir, "evaluation_topics_v1.0.json")
-    cast_topics_manual_file = os.path.join(args.cast_dir, "evaluation_topics_annotated_resolved_v1.0.tsv")
+    sim_file = args.duplicate_file
+    cast_topics_raw_file = os.path.join(args.cast_dir,
+                                        "evaluation_topics_v1.0.json")
+    cast_topics_manual_file = os.path.join(
+        args.cast_dir, "evaluation_topics_annotated_resolved_v1.0.tsv")
     cast_qrels_file = os.path.join(args.cast_dir, "2019qrels.txt")
 
     # OUTPUT
     out_topics_file = os.path.join(args.out_data_dir, "eval_topics.jsonl")
     out_raw_queries_file = os.path.join(args.out_data_dir, "queries.raw.tsv")
-    out_manual_queries_file = os.path.join(args.out_data_dir, "queries.manual.tsv")
+    out_manual_queries_file = os.path.join(args.out_data_dir,
+                                           "queries.manual.tsv")
     out_qrels_file = os.path.join(args.out_data_dir, "qrels.tsv")
-    car_id_to_idx_file = os.path.join(args.out_collection_dir, "car_id_to_idx.pickle")
-    car_idx_to_id_file = os.path.join(args.out_collection_dir, "car_idx_to_id.pickle")
-    out_collection_file = os.path.join(args.out_collection_dir, "collection.tsv")
+    car_id_to_idx_file = os.path.join(args.out_collection_dir,
+                                      "car_id_to_idx.pickle")
+    car_idx_to_id_file = os.path.join(args.out_collection_dir,
+                                      "car_idx_to_id.pickle")
+    out_collection_file = os.path.join(args.out_collection_dir,
+                                       "collection.tsv")
 
     # 1. Combine TREC-CAR & MS MARCO, remove duplicate passages, assign new ids
     car_id_to_idx = {}
     car_idx_to_id = []
-    if os.path.exists(out_collection_file) and os.path.exists(car_id_to_idx_file) and os.path.exists(car_idx_to_id_file):
+    if os.path.exists(out_collection_file) and os.path.exists(
+            car_id_to_idx_file) and os.path.exists(car_idx_to_id_file):
         print("Preprocessed collection found. Loading car_id_to_idx...")
         with open(car_id_to_idx_file, "rb") as f:
             car_id_to_idx = pickle.load(f)
@@ -64,12 +72,15 @@ if __name__ == "__main__":
         i = 0
         with open(out_collection_file, "w") as f:
             print("Processing TREC-CAR...")
-            for para in tqdm(read_data.iter_paragraphs(open(args.car_cbor, 'rb'))):
+            for para in tqdm(
+                    read_data.iter_paragraphs(open(args.car_cbor, 'rb'))):
                 car_id = "CAR_" + para.para_id
                 text = para.get_text()
-                text = text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+                text = text.replace("\t", " ").replace("\n",
+                                                       " ").replace("\r", " ")
                 idx = car_base_id + i
-                car_id_to_idx[car_id] = idx  # e.g. CAR_76a4a716d4b1b01995c6663ee16e94b4ca35fdd3 -> 10000044
+                car_id_to_idx[
+                    car_id] = idx  # e.g. CAR_76a4a716d4b1b01995c6663ee16e94b4ca35fdd3 -> 10000044
                 car_idx_to_id.append(car_id)
                 f.write("{}\t{}\n".format(idx, text))
                 i += 1
@@ -88,7 +99,7 @@ if __name__ == "__main__":
             pickle.dump(car_id_to_idx, f)
         with open(car_idx_to_id_file, "wb") as f:
             pickle.dump(car_idx_to_id, f)
-    
+
     # 2. Process queries
     print("Processing CAsT utterances...")
     with open(cast_topics_raw_file, "r") as fin:
@@ -116,10 +127,14 @@ if __name__ == "__main__":
     topic_number_dict = {}
     data = []
     for group in raw_data:
-        topic_number, description, turn, title = str(group['number']), group.get('description', ''), group['turn'], group.get('title', '')
+        topic_number, description, turn, title = str(
+            group['number']), group.get('description',
+                                        ''), group['turn'], group.get(
+                                            'title', '')
         queries = []
         for query in turn:
-            query_number, raw_utterance = str(query['number']), query['raw_utterance']
+            query_number, raw_utterance = str(
+                query['number']), query['raw_utterance']
             queries.append(raw_utterance)
             record = {}
             record['topic_number'] = topic_number
@@ -128,7 +143,9 @@ if __name__ == "__main__":
             record['title'] = title
             record['input'] = copy.deepcopy(queries)
             record['target'] = all_annonated[topic_number][query_number]
-            out_raw_queries.write("{}_{}\t{}\n".format(topic_number, query_number, raw_utterance))
+            out_raw_queries.write("{}_{}\t{}\n".format(topic_number,
+                                                       query_number,
+                                                       raw_utterance))
             if not topic_number in topic_number_dict:
                 topic_number_dict[topic_number] = len(topic_number_dict)
             data.append(record)
