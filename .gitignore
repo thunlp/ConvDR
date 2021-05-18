@@ -129,7 +129,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
 logs/
 checkpoints/
 datasets/
 results/
+
+.vscode/
