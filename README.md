@@ -227,4 +227,4 @@ To be released
 
 ## Contact
 
-Please send email to yus17@mails.tsinghua.edu.cn.
+Please send email to ~~yus17@mails.tsinghua.edu.cn~~ yushi17@foxmail.com.

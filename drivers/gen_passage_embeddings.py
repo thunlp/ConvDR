@@ -8,7 +8,7 @@ from utils.util import (
     StreamingDataset,
     EmbeddingCache,
 )
-from data.tokenize import GetProcessingFn
+from data.tokenizing import GetProcessingFn
 from model.models import MSMarcoConfigDict
 from torch import nn
 import torch.distributed as dist
@@ -148,7 +148,7 @@ def StreamInferenceDoc(args,
         model,
         inference_dataloader,
         is_query_inference=is_query_inference,
-        prefix=prefix)
+        )
 
     logger.info("merging embeddings")
 
@@ -179,7 +179,7 @@ def generate_new_ann(
 
     logger.info("***** inference of passages *****")
     passage_collection_path = os.path.join(args.data_dir,
-                                           args.tok_type + "_passages")
+                                           "passages")
     passage_cache = EmbeddingCache(passage_collection_path)
     with passage_cache as emb:
         passage_embedding, passage_embedding2id = StreamInferenceDoc(
