@@ -135,9 +135,9 @@ Run `./data/tokenizing.py` to tokenize documents in parallel:
 
 ```bash
 # CAsT
-python data/tokenize.py  --collection=datasets/cast-shared/collection.tsv  --out_data_dir=datasets/cast-shared/tokenized  --model_name_or_path=checkpoints/ad-hoc-ance-msmarco
+python data/tokenizing.py  --collection=datasets/cast-shared/collection.tsv  --out_data_dir=datasets/cast-shared/tokenized  --model_name_or_path=checkpoints/ad-hoc-ance-msmarco --model_type=rdot_nll
 # OR-QuAC
-python data/tokenize.py  --collection=datasets/or-quac/collection.tsv  --out_data_dir=datasets/or-quac/tokenized  --model_name_or_path=bert-base-uncased
+python data/tokenizing.py  --collection=datasets/or-quac/collection.tsv  --out_data_dir=datasets/or-quac/tokenized  --model_name_or_path=bert-base-uncased --model_type=dpr
 ```
 
 After tokenization, run `./drivers/gen_passage_embeddings.py` to generate document embeddings:

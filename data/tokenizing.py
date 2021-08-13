@@ -77,7 +77,7 @@ def preprocess(args):
 
 def PassagePreprocessingFn(args, line, tokenizer):
     line = line.strip()
-    ext = args.collection[args.collection.rfind(".")+1:]
+    ext = args.collection[args.collection.rfind("."):]
     passage = None
     if ext == ".jsonl":
         obj = json.loads(line)
@@ -244,6 +244,14 @@ def get_arguments():
         required=True,
         help="Path to pre-trained model or shortcut name selected in the list: " +
         ", ".join(ALL_MODELS),
+    )
+    parser.add_argument(
+        "--model_type",
+        default=None,
+        type=str,
+        required=True,
+        help="Model type selected in the list: " +
+        ", ".join(MSMarcoConfigDict.keys()),
     )
     parser.add_argument(
         "--max_seq_length",

@@ -1,7 +1,6 @@
 transformers==2.3.0
 pytrec-eval
 faiss-gpu
-torch==1.6.0
 sklearn
 tensorboardX
 trec-car-tools
