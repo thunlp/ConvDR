@@ -17,28 +17,6 @@ from utils.util import ConvSearchDataset, NUM_FOLD, set_seed, load_model, load_c
 
 logger = logging.getLogger(__name__)
 
-ngpu = faiss.get_num_gpus()
-gpu_resources = []
-tempmem = -1
-
-for i in range(ngpu):
-    res = faiss.StandardGpuResources()
-    if tempmem >= 0:
-        res.setTempMemory(tempmem)
-    gpu_resources.append(res)
-
-
-def make_vres_vdev(i0=0, i1=-1):
-    " return vectors of device ids and resources useful for gpu_multiple"
-    vres = faiss.GpuResourcesVector()
-    vdev = faiss.IntVector()
-    if i1 == -1:
-        i1 = ngpu
-    for i in range(i0, i1):
-        vdev.push_back(i)
-        vres.push_back(gpu_resources[i])
-    return vres, vdev
-
 
 def EvalDevQuery(query_embedding2id,
                  merged_D,
@@ -198,6 +176,7 @@ def search_one_by_one(ann_data_dir, gpu_index, query_embedding, topN):
         except:
             break
         print('passage embedding shape: ' + str(passage_embedding.shape))
+        print("query embedding shape: " + str(query_embedding.shape))
         gpu_index.add(passage_embedding)
         ts = time.time()
         D, I = gpu_index.search(query_embedding, topN)
@@ -345,6 +324,16 @@ def main():
     args.n_gpu = 1
     args.device = device
 
+    ngpu = faiss.get_num_gpus()
+    gpu_resources = []
+    tempmem = -1
+
+    for i in range(ngpu):
+        res = faiss.StandardGpuResources()
+        if tempmem >= 0:
+            res.setTempMemory(tempmem)
+        gpu_resources.append(res)
+
     # Setup logging
     logging.basicConfig(
         format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -360,33 +349,40 @@ def main():
         offset2pid = pickle.load(f)
 
     logger.info("Building index")
-    faiss.omp_set_num_threads(16)
+    # faiss.omp_set_num_threads(16)
     cpu_index = faiss.IndexFlatIP(768)
     index = None
     if args.use_gpu:
         co = faiss.GpuMultipleClonerOptions()
         co.shard = True
-        gpu_vector_resources, gpu_devices_vector = make_vres_vdev(0, ngpu)
-        gpu_index = faiss.index_cpu_to_gpu_multiple(gpu_vector_resources,
-                                                    gpu_devices_vector,
+        co.usePrecomputed = False
+        # gpu_vector_resources, gpu_devices_vector
+        vres = faiss.GpuResourcesVector()
+        vdev = faiss.Int32Vector()
+        for i in range(0, ngpu):
+            vdev.push_back(i)
+            vres.push_back(gpu_resources[i])
+        gpu_index = faiss.index_cpu_to_gpu_multiple(vres,
+                                                    vdev,
                                                     cpu_index, co)
         index = gpu_index
     else:
         index = cpu_index
 
     dev_query_positive_id = {}
-    with open(args.qrels, 'r', encoding='utf8') as f:
-        tsvreader = csv.reader(f, delimiter="\t")
-        for [topicid, _, docid, rel] in tsvreader:
-            topicid = str(topicid)
-            docid = int(docid)
-            rel = int(rel)
-            if topicid not in dev_query_positive_id:
-                if rel > 0:
-                    dev_query_positive_id[topicid] = {}
+    if args.qrels is not None:
+        with open(args.qrels, 'r', encoding='utf8') as f:
+            tsvreader = csv.reader(f, delimiter="\t")
+            for [topicid, _, docid, rel] in tsvreader:
+                topicid = str(topicid)
+                docid = int(docid)
+                rel = int(rel)
+                if topicid not in dev_query_positive_id:
+                    if rel > 0:
+                        dev_query_positive_id[topicid] = {}
+                        dev_query_positive_id[topicid][docid] = rel
+                else:
                     dev_query_positive_id[topicid][docid] = rel
-            else:
-                dev_query_positive_id[topicid][docid] = rel
 
     total_embedding = []
     total_embedding2id = []

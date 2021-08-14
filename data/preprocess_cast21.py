@@ -55,7 +55,8 @@ def main():
     doc_idx_to_id_file = os.path.join(args.out_collection_dir,
                                       "doc_idx_to_id.pickle")
     out_collection_file = os.path.join(args.out_collection_dir,
-                                       "2021collection.tsv")
+                                       "collection.tsv")
+    out_psuedo_qrels_file = os.path.join(args.out_data_dir, "qrels.tsv")
 
     # 1. Combine KILT, MS MARCO * WaPo, remove duplicate passages, assign new ids
     doc_id_to_idx = {}
@@ -77,6 +78,8 @@ def main():
                     pid = int(pid)
                     collection[pid] = text
                 except IndexError:
+                    print(line)
+                except ValueError:
                     print(line)
     else:
         with open(out_collection_file, "w") as f:
@@ -107,7 +110,7 @@ def main():
         text = collection[new_id]
         if text == "xx":
             raise ValueError("Unknown document")
-        return text
+        return text, new_id
 
     with open(cast_topics_manual_file, "r") as f:
         manual_raw = json.load(f)
@@ -115,6 +118,7 @@ def main():
     out_topics_fold = open(out_topics_file + ".0", "w")
     out_raw_queries = open(out_raw_queries_file, "w")
     out_manual_queries = open(out_manual_queries_file, "w")
+    out_psuedo_qrels = open(out_psuedo_qrels_file, "w")
     cur_fold = 0
     for manual_topic in manual_raw:
         topic_number = manual_topic["number"]
@@ -133,7 +137,7 @@ def main():
 
             res_id = manual_turn["canonical_result_id"] + "-" + str(manual_turn["passage_id"])
             manual_res_ids.append(res_id)
-            response = get_text_by_raw_id(
+            response, new_id = get_text_by_raw_id(
                 res_id)
             manual_responses.append(response)
 
@@ -156,6 +160,8 @@ def main():
                     out_topics_file + "." + str(fold_dict[topic_number]), "w")
                 cur_fold = fold_dict[topic_number]
             out_topics_fold.write(dumped_str)
+
+            out_psuedo_qrels.write(str(topic_number) + "_" + str(query_number)+ "\t0\t" + str(new_id) + "\t1\n")
 
             out_raw_queries.write(
                 str(topic_number) + "_" + str(query_number) + "\t" + raw +

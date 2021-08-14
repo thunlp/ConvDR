@@ -325,7 +325,7 @@ def numbered_byte_file_generator(base_path, file_no, record_size):
 
 
 def load_collection(collection_file):
-    all_passages = ["[INVALID DOC ID]"] * 4000_0000
+    all_passages = ["[INVALID DOC ID]"] * 5000_0000
     ext = collection_file[collection_file.rfind(".") + 1:]
     if ext not in ["jsonl", "tsv"]:
         raise TypeError("Unrecognized file type")
@@ -346,7 +346,9 @@ def load_collection(collection_file):
                     passage = line_arr[1].rstrip()
                     all_passages[pid] = passage
                 except IndexError:
-                    pass
+                    print("bad passage")
+                except ValueError:
+                    print("bad pid")
     return all_passages
 
 
