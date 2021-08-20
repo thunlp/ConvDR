@@ -223,7 +223,7 @@ Three trained models can be downloaded with the following link: [CAsT19-KD-CV-Fo
 
 ## Results
 
-To be released
+[Download ConvDR and baseline runs on CAsT](https://drive.google.com/file/d/1F0RwA9sZscUAyE0IyQ7PMrgzNVqDnho5/view?usp=sharing)
 
 ## Contact
 
