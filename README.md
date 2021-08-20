@@ -215,8 +215,6 @@ python drivers/run_convdr_inference.py  --model_path=checkpoints/convdr-kd-cast1
 
 The query embedding inference always takes the first GPU. If you set the `--use_gpu` flag (recommended), the retrieval will be performed on the remaining GPUs. The retrieval process consumes a lot of GPU resources. To reduce the resource usage, we split all document embeddings into several blocks, perform searching one-by-one and finally combine the results. If you have enough GPU resources, you can modify the code to perform searching all at once.
 
-We will release all the result files in the future.
-
 ## Download Trained Models
 
 Three trained models can be downloaded with the following link: [CAsT19-KD-CV-Fold1](https://data.thunlp.org/convdr/convdr-kd-cast19-1.zip), [CAsT20-KD-Warmup-CV-Fold2](https://data.thunlp.org/convdr/convdr-kd-cast20-2.zip) and [ORQUAC-Multi](https://data.thunlp.org/convdr/convdr-multi-orquac.cp).
